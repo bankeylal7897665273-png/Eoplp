@@ -49,7 +49,6 @@ def authenticate():
     
     try:
         if action == 'register':
-            # Check if username exists
             users = db_get("users") or {}
             for uid, udata in users.items():
                 if udata.get('username') == username:
@@ -58,15 +57,15 @@ def authenticate():
             res = requests.post(AUTH_SIGNUP_URL, json=payload)
             if res.status_code == 200:
                 user_id = res.json()['localId']
-                # Create user profile in DB
                 db_put(f"users/{user_id}", {
                     "email": email,
                     "username": username,
-                    "plan": "Free",
+                    "plan": "None",
                     "otp_limit": 0,
                     "otp_sent": 0,
                     "otp_failed": 0,
-                    "api_status": "inactive"
+                    "api_status": "inactive",
+                    "total_apis": 0
                 })
                 return jsonify({"status": "success", "message": "Account Created Successfully!"})
             else:
@@ -77,7 +76,6 @@ def authenticate():
             if res.status_code == 200:
                 user_id = res.json()['localId']
                 session['user_id'] = user_id
-                # Check if admin
                 if email == ADMIN_EMAIL and password == ADMIN_PASSWORD:
                     session['is_admin'] = True
                 return jsonify({"status": "success", "message": "Login Successful!"})
@@ -110,6 +108,12 @@ def submit_utr():
     plan_name = data.get('plan_name')
     otp_amount = data.get('otp_amount')
     price = data.get('price')
+    
+    # API Details included in UTR Request
+    api_name = data.get('api_name')
+    app_email = data.get('app_email')
+    app_password = data.get('app_password')
+    
     user_id = session['user_id']
     
     if len(utr) != 12:
@@ -120,6 +124,9 @@ def submit_utr():
         "plan_name": plan_name,
         "otp_amount": otp_amount,
         "price": price,
+        "api_name": api_name,
+        "app_email": app_email,
+        "app_password": app_password,
         "status": "pending",
         "date": str(datetime.datetime.now())
     })
@@ -134,54 +141,35 @@ def create_api():
     name = data.get('name')
     app_email = data.get('app_email')
     app_password = data.get('app_password')
+    plan_type = data.get('plan_type') # 'Free'
     user_id = session['user_id']
     
     if len(app_password) != 16:
         return jsonify({"status": "error", "message": "App Password must be 16 characters!"})
         
     user_data = db_get(f"users/{user_id}")
-    if user_data.get('plan') == 'Free' and user_data.get('api_status') == 'active':
-        return jsonify({"status": "error", "message": "Free users can only create API once!"})
-        
-    db_patch(f"users/{user_id}", {
-        "api_name": name,
-        "app_email": app_email,
-        "app_password": app_password,
-        "api_status": "active"
-    })
     
-    # If free plan, give 15 limit
-    if user_data.get('plan') == 'Free':
-         db_patch(f"users/{user_id}", {"otp_limit": 15})
-
-    return jsonify({"status": "success", "message": "API Created Successfully!"})
-
-# The Main API Endpoint for Users
-@app.route('/<username>/<target_email>')
-def send_user_otp(username, target_email):
-    users = db_get("users") or {}
-    user_id = None
-    user_data = None
-    
-    for uid, udata in users.items():
-        if udata.get('username') == username:
-            user_id = uid
-            user_data = udata
-            break
+    if plan_type == 'Free':
+        if user_data.get('total_apis', 0) > 0:
+            return jsonify({"status": "error", "message": "Free user can only create 1 API!"})
             
-    if not user_data:
-        return jsonify({"status": "error", "message": "Invalid Username API"})
-        
-    if user_data.get('api_status') != 'active':
-        return jsonify({"status": "error", "message": "API not created or inactive"})
-        
-    limit = user_data.get('otp_limit', 0)
-    sent = user_data.get('otp_sent', 0)
+        db_patch(f"users/{user_id}", {
+            "plan": "Free",
+            "api_name": name,
+            "app_email": app_email,
+            "app_password": app_password,
+            "api_status": "active",
+            "otp_limit": 1,
+            "total_apis": 1
+        })
+        return jsonify({"status": "success", "message": "Free API Created Successfully!"})
     
-    if str(limit) != "Unlimited" and sent >= int(limit):
-        return jsonify({"status": "error", "message": "OTP Limit Reached! Upgrade Plan."})
-        
-    otp = str(random.randint(100000, 999999))
+    return jsonify({"status": "error", "message": "Invalid Request"})
+
+# Function to send OTP (Reusable)
+def send_otp_logic(user_id, user_data, target_email):
+    # Generate 4 Digit OTP
+    otp = str(random.randint(1000, 9999))
     sender_email = user_data.get('app_email')
     app_password = user_data.get('app_password')
     
@@ -196,8 +184,10 @@ def send_user_otp(username, target_email):
         server.send_message(msg)
         server.quit()
         
-        # Update DB
+        # Update DB Stats
+        sent = user_data.get('otp_sent', 0)
         db_patch(f"users/{user_id}", {"otp_sent": sent + 1})
+        
         # Save History
         history_id = str(random.randint(10000, 99999))
         db_put(f"history/{user_id}/{history_id}", {
@@ -206,12 +196,93 @@ def send_user_otp(username, target_email):
             "status": "Success",
             "date": str(datetime.datetime.now())
         })
-        return jsonify({"status": "success", "message": "OTP Sent Successfully", "otp": otp})
         
+        # 1-Minute Expiry Logic
+        expiry_time = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        db_patch(f"active_otps/{target_email.replace('.', '_')}", {
+            "otp": otp,
+            "expiry": str(expiry_time)
+        })
+        
+        return True, otp
     except Exception as e:
         failed = user_data.get('otp_failed', 0)
         db_patch(f"users/{user_id}", {"otp_failed": failed + 1})
+        return False, str(e)
+
+# The Main API Endpoint for Generating OTP
+@app.route('/<username>/<target_email>')
+def send_user_otp(username, target_email):
+    users = db_get("users") or {}
+    user_id = None
+    user_data = None
+    
+    for uid, udata in users.items():
+        if udata.get('username') == username:
+            user_id = uid
+            user_data = udata
+            break
+            
+    if not user_data or user_data.get('api_status') != 'active':
+        return jsonify({"status": "error", "message": "Invalid Username API or Inactive"})
+        
+    limit = user_data.get('otp_limit', 0)
+    sent = user_data.get('otp_sent', 0)
+    
+    if str(limit) != "Unlimited" and sent >= int(limit):
+        return jsonify({"status": "error", "message": "OTP Limit Reached! Upgrade Plan."})
+        
+    success, otp_or_error = send_otp_logic(user_id, user_data, target_email)
+    
+    if success:
+        return jsonify({"status": "success", "message": "OTP Sent Successfully", "otp": otp_or_error})
+    else:
         return jsonify({"status": "error", "message": "Failed to send OTP. Check App Password."})
+
+# 1-Minute Auto-Expire Verification Endpoint
+@app.route('/<username>/verify', methods=['POST'])
+def verify_user_otp(username):
+    data = request.json
+    target_email = data.get('email')
+    user_otp = data.get('otp')
+    
+    users = db_get("users") or {}
+    user_id = None
+    user_data = None
+    for uid, udata in users.items():
+        if udata.get('username') == username:
+            user_id = uid
+            user_data = udata
+            break
+
+    if not user_data:
+        return jsonify({"status": "error", "message": "Invalid API"})
+        
+    safe_email = target_email.replace('.', '_')
+    otp_data = db_get(f"active_otps/{safe_email}")
+    
+    if not otp_data:
+        return jsonify({"status": "error", "message": "No active OTP found for this email."})
+        
+    expiry_time = datetime.datetime.strptime(otp_data['expiry'], "%Y-%m-%d %H:%M:%S.%f")
+    
+    if datetime.datetime.now() > expiry_time:
+        # OTP Expired -> Automatically send a new one
+        success, new_otp = send_otp_logic(user_id, user_data, target_email)
+        if success:
+             return jsonify({
+                 "status": "expired_resend", 
+                 "message": "1 Minute limit over! Old OTP expired. Auto-generated and sent a NEW OTP to email. Please verify with the new OTP."
+             })
+        else:
+             return jsonify({"status": "error", "message": "OTP expired, but failed to send a new one."})
+             
+    if user_otp == otp_data['otp']:
+        # Delete OTP after successful verification
+        requests.delete(f"{FIREBASE_DB_URL}/otp_bot/active_otps/{safe_email}.json")
+        return jsonify({"status": "success", "message": "Account Verified Successfully!"})
+    else:
+        return jsonify({"status": "error", "message": "Invalid OTP entered."})
 
 # Admin Panel
 @app.route('/admin')
@@ -229,9 +300,15 @@ def approve_utr(utr):
     payment = db_get(f"pending_payments/{utr}")
     if payment:
         user_id = payment['user_id']
+        total = db_get(f"users/{user_id}/total_apis") or 0
         db_patch(f"users/{user_id}", {
             "plan": payment['plan_name'],
-            "otp_limit": payment['otp_amount']
+            "otp_limit": payment['otp_amount'],
+            "api_name": payment['api_name'],
+            "app_email": payment['app_email'],
+            "app_password": payment['app_password'],
+            "api_status": "active",
+            "total_apis": total + 1
         })
         db_put(f"pending_payments/{utr}/status", "Approved")
     return redirect(url_for('admin_panel'))
