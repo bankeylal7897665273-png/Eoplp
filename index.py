@@ -3,6 +3,7 @@ import requests
 import os
 from dotenv import load_dotenv
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import random
 import datetime
@@ -149,7 +150,7 @@ def create_api():
     user_data = db_get(f"users/{user_id}")
     
     if plan_type == 'Free':
-        # Yahan par check ho raha hai limit
+        # API creation limit is 1
         if user_data.get('total_apis', 0) >= 1:
             return jsonify({"status": "error", "message": "Alert! You can only create 1 Free API. Please upgrade plan to create more."})
             
@@ -159,10 +160,10 @@ def create_api():
             "app_email": app_email,
             "app_password": app_password,
             "api_status": "active",
-            "otp_limit": 1,
+            "otp_limit": 20, # FIX: OTP bhejney ki limit yaha 20 kar di gayi hai
             "total_apis": 1
         })
-        return jsonify({"status": "success", "message": "Free API Created Successfully!"})
+        return jsonify({"status": "success", "message": "Free API Created Successfully with 20 OTP limit!"})
     
     return jsonify({"status": "error", "message": "Invalid Request"})
 
@@ -171,10 +172,31 @@ def send_otp_logic(user_id, user_data, target_email):
     sender_email = user_data.get('app_email')
     app_password = user_data.get('app_password')
     
-    msg = MIMEText(f"Your OTP is: {otp}\n\nPowered by VIP OTP API System ☠️")
-    msg['Subject'] = 'Verification OTP'
+    # HTML Email Design Setup
+    msg = MIMEMultipart()
+    msg['Subject'] = 'Verification OTP ☠️'
     msg['From'] = sender_email
     msg['To'] = target_email
+    
+    # Ye raha bada bada OTP ka design
+    html_content = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; text-align: center;">
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 10px; max-width: 400px; margin: auto; box-shadow: 0px 0px 15px rgba(0,0,0,0.1);">
+            <h2 style="color: #333; margin-top: 0;">Verification Code</h2>
+            <p style="color: #666; font-size: 16px;">Please use the following OTP to verify your account. It is valid for exactly 1 minute.</p>
+            <div style="margin: 30px 0;">
+                <h1 style="font-size: 50px; color: #000; background-color: #f0f0f0; border: 2px dashed #00ffcc; padding: 15px 30px; border-radius: 10px; display: inline-block; letter-spacing: 8px; margin: 0;">{otp}</h1>
+            </div>
+            <p style="color: #ff3333; font-size: 14px; font-weight: bold;">DO NOT SHARE THIS CODE WITH ANYONE.</p>
+            <br>
+            <p style="color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">Powered by VIP OTP API System ☠️</p>
+        </div>
+      </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(html_content, 'html'))
     
     try:
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
