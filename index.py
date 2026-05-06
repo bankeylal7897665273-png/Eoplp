@@ -109,7 +109,6 @@ def submit_utr():
     otp_amount = data.get('otp_amount')
     price = data.get('price')
     
-    # API Details included in UTR Request
     api_name = data.get('api_name')
     app_email = data.get('app_email')
     app_password = data.get('app_password')
@@ -141,17 +140,18 @@ def create_api():
     name = data.get('name')
     app_email = data.get('app_email')
     app_password = data.get('app_password')
-    plan_type = data.get('plan_type') # 'Free'
+    plan_type = data.get('plan_type')
     user_id = session['user_id']
     
     if len(app_password) != 16:
-        return jsonify({"status": "error", "message": "App Password must be 16 characters!"})
+        return jsonify({"status": "error", "message": "App Password must be 16 characters without space!"})
         
     user_data = db_get(f"users/{user_id}")
     
     if plan_type == 'Free':
-        if user_data.get('total_apis', 0) > 0:
-            return jsonify({"status": "error", "message": "Free user can only create 1 API!"})
+        # Yahan par check ho raha hai limit
+        if user_data.get('total_apis', 0) >= 1:
+            return jsonify({"status": "error", "message": "Alert! You can only create 1 Free API. Please upgrade plan to create more."})
             
         db_patch(f"users/{user_id}", {
             "plan": "Free",
@@ -166,9 +166,7 @@ def create_api():
     
     return jsonify({"status": "error", "message": "Invalid Request"})
 
-# Function to send OTP (Reusable)
 def send_otp_logic(user_id, user_data, target_email):
-    # Generate 4 Digit OTP
     otp = str(random.randint(1000, 9999))
     sender_email = user_data.get('app_email')
     app_password = user_data.get('app_password')
@@ -184,11 +182,9 @@ def send_otp_logic(user_id, user_data, target_email):
         server.send_message(msg)
         server.quit()
         
-        # Update DB Stats
         sent = user_data.get('otp_sent', 0)
         db_patch(f"users/{user_id}", {"otp_sent": sent + 1})
         
-        # Save History
         history_id = str(random.randint(10000, 99999))
         db_put(f"history/{user_id}/{history_id}", {
             "email": target_email,
@@ -197,7 +193,6 @@ def send_otp_logic(user_id, user_data, target_email):
             "date": str(datetime.datetime.now())
         })
         
-        # 1-Minute Expiry Logic
         expiry_time = datetime.datetime.now() + datetime.timedelta(minutes=1)
         db_patch(f"active_otps/{target_email.replace('.', '_')}", {
             "otp": otp,
@@ -210,7 +205,6 @@ def send_otp_logic(user_id, user_data, target_email):
         db_patch(f"users/{user_id}", {"otp_failed": failed + 1})
         return False, str(e)
 
-# The Main API Endpoint for Generating OTP
 @app.route('/<username>/<target_email>')
 def send_user_otp(username, target_email):
     users = db_get("users") or {}
@@ -239,7 +233,6 @@ def send_user_otp(username, target_email):
     else:
         return jsonify({"status": "error", "message": "Failed to send OTP. Check App Password."})
 
-# 1-Minute Auto-Expire Verification Endpoint
 @app.route('/<username>/verify', methods=['POST'])
 def verify_user_otp(username):
     data = request.json
@@ -267,7 +260,6 @@ def verify_user_otp(username):
     expiry_time = datetime.datetime.strptime(otp_data['expiry'], "%Y-%m-%d %H:%M:%S.%f")
     
     if datetime.datetime.now() > expiry_time:
-        # OTP Expired -> Automatically send a new one
         success, new_otp = send_otp_logic(user_id, user_data, target_email)
         if success:
              return jsonify({
@@ -278,13 +270,11 @@ def verify_user_otp(username):
              return jsonify({"status": "error", "message": "OTP expired, but failed to send a new one."})
              
     if user_otp == otp_data['otp']:
-        # Delete OTP after successful verification
         requests.delete(f"{FIREBASE_DB_URL}/otp_bot/active_otps/{safe_email}.json")
         return jsonify({"status": "success", "message": "Account Verified Successfully!"})
     else:
         return jsonify({"status": "error", "message": "Invalid OTP entered."})
 
-# Admin Panel
 @app.route('/admin')
 def admin_panel():
     if not session.get('is_admin'):
