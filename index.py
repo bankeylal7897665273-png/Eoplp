@@ -150,7 +150,6 @@ def create_api():
     user_data = db_get(f"users/{user_id}")
     
     if plan_type == 'Free':
-        # API creation limit is 1
         if user_data.get('total_apis', 0) >= 1:
             return jsonify({"status": "error", "message": "Alert! You can only create 1 Free API. Please upgrade plan to create more."})
             
@@ -160,7 +159,7 @@ def create_api():
             "app_email": app_email,
             "app_password": app_password,
             "api_status": "active",
-            "otp_limit": 20, # FIX: OTP bhejney ki limit yaha 20 kar di gayi hai
+            "otp_limit": 20, 
             "total_apis": 1
         })
         return jsonify({"status": "success", "message": "Free API Created Successfully with 20 OTP limit!"})
@@ -172,13 +171,11 @@ def send_otp_logic(user_id, user_data, target_email):
     sender_email = user_data.get('app_email')
     app_password = user_data.get('app_password')
     
-    # HTML Email Design Setup
     msg = MIMEMultipart()
     msg['Subject'] = 'Verification OTP ☠️'
     msg['From'] = sender_email
     msg['To'] = target_email
     
-    # Ye raha bada bada OTP ka design
     html_content = f"""
     <html>
       <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; text-align: center;">
@@ -199,7 +196,10 @@ def send_otp_logic(user_id, user_data, target_email):
     msg.attach(MIMEText(html_content, 'html'))
     
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # 🚀 FAST DELIVERY UPDATE: Port 587 with STARTTLS and a 10-second timeout!
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server.ehlo()
+        server.starttls()
         server.login(sender_email, app_password)
         server.send_message(msg)
         server.quit()
