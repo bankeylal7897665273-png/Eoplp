@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIP OTP API - Login</title>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #121212; color: #fff; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .box { background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 0 20px #00ffcc; width: 320px; text-align: center; }
+        h2 { color: #00ffcc; margin-bottom: 20px; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border: none; border-radius: 5px; background: #333; color: #fff; outline: none; border: 1px solid #00ffcc; }
+        button { width: 100%; padding: 10px; border: none; border-radius: 5px; background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; position: relative; font-size: 16px; }
+        button:hover { background: #00e6b8; }
+        .spinner { display: none; width: 20px; height: 20px; border: 3px solid rgba(0,0,0,0.3); border-radius: 50%; border-top-color: #000; animation: spin 1s ease-in-out infinite; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+        @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+        .toggle-link { color: #00ffcc; cursor: pointer; margin-top: 15px; display: block; font-size: 14px; text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="box" id="loginBox">
+        <h2>LOGIN ☠️</h2>
+        <input type="email" id="loginEmail" placeholder="Email" required>
+        <input type="password" id="loginPassword" placeholder="Password" required>
+        <button onclick="auth('login')">
+            <span id="loginText">Login</span>
+            <div class="spinner" id="loginSpinner"></div>
+        </button>
+        <span class="toggle-link" onclick="toggleForm()">Don't have an account? Create one</span>
+    </div>
+
+    <div class="box" id="registerBox" style="display: none;">
+        <h2>CREATE ACCOUNT 💀</h2>
+        <input type="text" id="regUsername" placeholder="Username (For API)" required>
+        <input type="email" id="regEmail" placeholder="Email" required>
+        <input type="password" id="regPassword" placeholder="Password" required>
+        <input type="password" id="regRePassword" placeholder="Re-enter Password" required>
+        <button onclick="auth('register')">
+            <span id="regText">Register</span>
+            <div class="spinner" id="regSpinner"></div>
+        </button>
+        <span class="toggle-link" onclick="toggleForm()">Already have an account? Login</span>
+    </div>
+
+    <script>
+        function toggleForm() {
+            const loginBox = document.getElementById('loginBox');
+            const registerBox = document.getElementById('registerBox');
+            if (loginBox.style.display === 'none') {
+                loginBox.style.display = 'block';
+                registerBox.style.display = 'none';
+            } else {
+                loginBox.style.display = 'none';
+                registerBox.style.display = 'block';
+            }
+        }
+
+        function auth(action) {
+            let email, password, username = '';
+            let btnText, spinner;
+
+            if (action === 'login') {
+                email = document.getElementById('loginEmail').value;
+                password = document.getElementById('loginPassword').value;
+                btnText = document.getElementById('loginText');
+                spinner = document.getElementById('loginSpinner');
+            } else {
+                username = document.getElementById('regUsername').value;
+                email = document.getElementById('regEmail').value;
+                password = document.getElementById('regPassword').value;
+                let rePassword = document.getElementById('regRePassword').value;
+                btnText = document.getElementById('regText');
+                spinner = document.getElementById('regSpinner');
+
+                if (password !== rePassword) {
+                    Swal.fire('Error', 'Passwords do not match!', 'error');
+                    return;
+                }
+            }
+
+            if (!email || !password) {
+                Swal.fire('Error', 'Please fill all fields!', 'error');
+                return;
+            }
+
+            // Gol gol ghumega (Spinner)
+            btnText.style.display = 'none';
+            spinner.style.display = 'block';
+
+            fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, email, password, username })
+            })
+            .then(res => res.json())
+            .then(data => {
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+
+                if (data.status === 'success') {
+                    Swal.fire({
+                        title: 'Welcome! ☠️',
+                        text: data.message,
+                        icon: 'success',
+                        confirmButtonText: 'OK',
+                        allowOutsideClick: false
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            if (action === 'login') {
+                                window.location.href = '/dashboard';
+                            } else {
+                                toggleForm();
+                            }
+                        }
+                    });
+                } else {
+                    Swal.fire('Alert!', data.message, 'error');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
