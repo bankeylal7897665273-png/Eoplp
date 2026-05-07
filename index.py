@@ -112,7 +112,8 @@ def submit_utr():
     
     api_name = data.get('api_name')
     app_email = data.get('app_email')
-    app_password = data.get('app_password')
+    
+    app_password = data.get('app_password', '').replace(" ", "").strip()
     
     user_id = session['user_id']
     
@@ -140,12 +141,14 @@ def create_api():
     data = request.json
     name = data.get('name')
     app_email = data.get('app_email')
-    app_password = data.get('app_password')
     plan_type = data.get('plan_type')
+    
+    app_password = data.get('app_password', '').replace(" ", "").strip()
+    
     user_id = session['user_id']
     
     if len(app_password) != 16:
-        return jsonify({"status": "error", "message": "App Password must be 16 characters without space!"})
+        return jsonify({"status": "error", "message": "App Password must be 16 characters (system will auto-remove spaces if any)!"})
         
     user_data = db_get(f"users/{user_id}")
     
@@ -169,7 +172,8 @@ def create_api():
 def send_otp_logic(user_id, user_data, target_email):
     otp = str(random.randint(1000, 9999))
     sender_email = user_data.get('app_email')
-    app_password = user_data.get('app_password')
+    
+    app_password = user_data.get('app_password', '').replace(" ", "").strip()
     
     msg = MIMEMultipart()
     msg['Subject'] = 'Verification OTP ☠️'
@@ -196,7 +200,6 @@ def send_otp_logic(user_id, user_data, target_email):
     msg.attach(MIMEText(html_content, 'html'))
     
     try:
-        # 🚀 FAST DELIVERY UPDATE: Port 587 with STARTTLS and a 10-second timeout!
         server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
         server.ehlo()
         server.starttls()
@@ -223,6 +226,7 @@ def send_otp_logic(user_id, user_data, target_email):
         
         return True, otp
     except Exception as e:
+        print(f"💥 GMAIL ERROR LOG: {e}") 
         failed = user_data.get('otp_failed', 0)
         db_patch(f"users/{user_id}", {"otp_failed": failed + 1})
         return False, str(e)
@@ -253,7 +257,7 @@ def send_user_otp(username, target_email):
     if success:
         return jsonify({"status": "success", "message": "OTP Sent Successfully", "otp": otp_or_error})
     else:
-        return jsonify({"status": "error", "message": "Failed to send OTP. Check App Password."})
+        return jsonify({"status": "error", "message": "Failed to send OTP. Check App Password or App Password blocked by Google."})
 
 @app.route('/<username>/verify', methods=['POST'])
 def verify_user_otp(username):
